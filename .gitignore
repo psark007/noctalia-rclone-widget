@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.zip
+mounts.json
+tasks.json
+runs.json
+diagnostics.json
+rclone.conf
+*.log

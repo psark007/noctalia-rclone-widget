@@ -1,0 +1,23 @@
+id = "psark007/rclone-status"
+name = "Rclone Status"
+version = "1.0.0"
+plugin_api = 24
+author = "psark007"
+license = "MIT"
+dependencies = ["python3", "rclone"]
+tags = ["bar", "storage", "utility"]
+icon = "cloud"
+description = "Manage Rclone mounts and manual copy/sync tasks from Noctalia."
+
+[[widget]]
+id = "status"
+entry = "status.luau"
+
+[[panel]]
+id = "details"
+entry = "panel.luau"
+width = 640
+height = 640
+placement = "attached"
+position = "center"
+open_near_click = false
