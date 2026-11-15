@@ -9,6 +9,17 @@ tags = ["bar", "storage", "utility"]
 icon = "cloud"
 description = "Manage Rclone mounts and manual copy/sync tasks from Noctalia."
 
+[[service]]
+id = "status-service"
+entry = "service.luau"
+
+[[setting]]
+key = "config_dir"
+type = "folder"
+label_key = "settings.config_dir.label"
+description_key = "settings.config_dir.description"
+default = "~/.config/noctalia-rclone"
+
 [[widget]]
 id = "status"
 entry = "status.luau"

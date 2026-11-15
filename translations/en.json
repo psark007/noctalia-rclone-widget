@@ -1,0 +1,4 @@
+{
+  "settings.config_dir.label": "Data directory",
+  "settings.config_dir.description": "Directory for mounts, tasks, state, and cache. Point this at another widget's directory to share definitions."
+}

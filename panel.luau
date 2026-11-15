@@ -1,6 +1,11 @@
 --!nonstrict
 -- Interactive UI backed by the user's Rclone Mounts & Tasks project.
 local backend = noctalia.pluginDir() .. "/backend.py"
+local function backendArgs(operation, ...)
+    local args = { "/usr/bin/python3", backend, "--config-dir", noctalia.expandPath(noctalia.getConfig("config_dir")), operation }
+    for _, value in ipairs({ ... }) do table.insert(args, value) end
+    return args
+end
 local busy = false
 local mounts, tasks = {}, {}
 local activeTab = "mounts"
@@ -18,7 +23,7 @@ local function decoded(result)
 end
 
 local function mergeDefinitions(snapshot)
-    local ok = noctalia.runAsync({ "/usr/bin/python3", backend, "definitions" }, function(result)
+    local ok = noctalia.runAsync(backendArgs("definitions"), function(result)
         local data = decoded(result)
         if data then
             local mountById, taskById = {}, {}
@@ -57,7 +62,7 @@ local function loadSnapshot(message)
     busy = true
     notice = message or "Refreshing…"
     render()
-    local ok = noctalia.runAsync({ "/usr/bin/python3", backend, "snapshot" }, function(result)
+    local ok = noctalia.runAsync(backendArgs("snapshot"), function(result)
         local data, err = decoded(result)
         if not data then
             busy = false
@@ -81,7 +86,7 @@ local function runBackend(operation, argument)
     pending = nil
     notice = "Working…"
     render()
-    local argv = { "/usr/bin/python3", backend, operation }
+    local argv = backendArgs(operation)
     if argument ~= nil then table.insert(argv, argument) end
     local ok = noctalia.runAsync(argv, function(result)
         busy = false
@@ -115,12 +120,12 @@ local function beginForm(kind, item)
     render()
 end
 
-local function cancelForm()
+function cancelForm()
     form = nil
     render()
 end
 
-local function saveForm()
+function saveForm()
     if not form then return end
     local payload
     local operation
@@ -146,12 +151,12 @@ local function askPending(kind, item)
     render()
 end
 
-local function cancelPending()
+function cancelPending()
     pending = nil
     render()
 end
 
-local function confirmPending()
+function confirmPending()
     if not pending then return end
     local action = pending
     if action.kind == "remove-mount" then
@@ -172,6 +177,7 @@ end
 function render()
     local head = {
         ui.label({ text = "Rclone", fontSize = 20, fontWeight = "bold", color = "primary", flexGrow = 1 }),
+        ui.button({ glyph = "settings", tooltip = "Rclone settings", variant = "ghost", onClick = "openSettings" }),
         ui.button({ glyph = "refresh", tooltip = "Refresh status", variant = "ghost", enabled = not busy, onClick = "refresh" }),
     }
     local tabs = {
@@ -281,6 +287,10 @@ function render()
         ui.row({ gap = 6 }, tabs),
         ui.scroll({ flexGrow = 1, gap = 10 }, list),
     }))
+end
+
+function openSettings()
+    noctalia.runAsync("noctalia msg settings-open-plugin psark007/rclone-status")
 end
 
 function onOpen()
