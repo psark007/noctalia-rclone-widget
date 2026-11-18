@@ -21,7 +21,15 @@ local function render(data)
         totalTasks += 1
         if task.running then
             running += 1
-            table.insert(lines, string.format("Sync: %s (%d/%d)", task.name, task.destination or 0, task.total or 0))
+            local direction = task.direction == "upload" and "Upload" or "Download"
+            table.insert(lines, string.format("%s: %s (%d/%d)", direction, task.name, task.destination or 0, task.total or 0))
+        end
+    end
+    for _, item in ipairs(data.bisyncs or {}) do
+        totalTasks += 1
+        if item.running then
+            running += 1
+            table.insert(lines, string.format("Bisync: %s", item.name))
         end
     end
 
@@ -33,8 +41,8 @@ local function render(data)
     barWidget.setGlyphColor(color)
     barWidget.setColor((running > 0 or mounted > 0) and color or "")
     barWidget.setText(table.concat(counts, " "))
-    if #lines == 0 then table.insert(lines, "No rclone mounts or tasks configured.") end
-    barWidget.setTooltip(table.concat(lines, "\n") .. string.format("\n\n%d of %d mounts · %d of %d tasks running", mounted, totalMounts, running, totalTasks))
+    if #lines == 0 then table.insert(lines, "No rclone mounts, tasks, or Bisync pairs configured.") end
+    barWidget.setTooltip(table.concat(lines, "\n") .. string.format("\n\n%d of %d mounts · %d of %d jobs running", mounted, totalMounts, running, totalTasks))
 end
 
 noctalia.state.watch("rclone_status", render)

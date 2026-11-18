@@ -1,5 +1,5 @@
 id = "psark007/rclone-status"
-name = "Rclone Status"
+name = "Rclone Manager"
 version = "1.0.0"
 plugin_api = 24
 author = "psark007"
@@ -7,7 +7,7 @@ license = "MIT"
 dependencies = ["python3", "rclone"]
 tags = ["bar", "storage", "utility"]
 icon = "cloud"
-description = "Manage Rclone mounts and manual copy/sync tasks from Noctalia."
+description = "Manage Rclone mounts, scheduled transfers, and Bisync pairs from Noctalia."
 
 [[service]]
 id = "status-service"

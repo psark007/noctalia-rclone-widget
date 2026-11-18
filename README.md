@@ -1,33 +1,40 @@
-# Rclone Mounts & Tasks for Noctalia
+# Rclone Manager for Noctalia
 
-Manual Rclone mounts and copy/sync tasks for Noctalia. New installs start empty;
-nothing mounts or transfers automatically. The plugin is standalone and does not
-require GNOME Shell or the GNOME extension. Its default data directory is
-`~/.config/noctalia-rclone`, and it can be pointed at another directory from
-Noctalia plugin settings to share definitions with another frontend.
+Manage Rclone mounts, copy/sync tasks, and Bisync pairs from Noctalia. New
+installs start empty; nothing mounts or transfers automatically. The plugin is
+standalone and does not require GNOME Shell. Its default data directory is
+`~/.config/noctalia-rclone`; change it in Noctalia plugin settings to share
+definitions with another frontend.
 
 ## Use
 
-- Add mounts and tasks in the Noctalia panel using explicit `remote:path` values.
+- Add mounts, tasks, and Bisync pairs in the Noctalia panel using explicit `remote:path` values.
   Mountpoints must already exist and be empty. Active mounts cannot be edited or
   removed.
-- Open the panel's settings button to choose the **Data directory**. The same
-  setting is available in Noctalia's plugin settings and controls definitions,
+- Use the panel's **Settings** tab to enable or disable logging and open log files. The data
+  directory itself is set in Noctalia plugin settings; it controls definitions,
   state, logs, and cache.
-- Tasks run on demand. Different tasks can run concurrently, but each task can
-  run only once at a time. Multiple destinations run sequentially; a failed
-  destination stops the task. Single-destination tasks can run in reverse.
-- Run, Reverse, Stop, and Remove require confirmation.
+- Tasks run on demand or on a daily/weekly local-time schedule. Each task can
+  have only one run at a time; separate tasks may run concurrently. Multiple
+  destinations run sequentially; a failed destination stops the task.
+  Single-destination tasks can run in reverse.
+- Bisync pairs run on demand or on a daily/weekly schedule. Use **Resync** to
+  establish the baseline before the first scheduled run. Normal Bisync propagates
+  changes and deletions both ways; Resync remains manual. It is not a real-time watcher.
+- Reorder mounts, tasks, and Bisync pairs with the up/down buttons in their rows.
+- Run, Reverse, Resync, Stop, and Remove require confirmation.
 - **Sync can delete destination-only files**, including local files when
   downloading or reversing an upload. Check paths before confirming.
 
-The bar shows counts such as `2M 1T` for two mounts and one active transfer;
+The bar shows counts such as `2M 1T` for two mounts and one active job;
 zero values are omitted. The cloud uses high-contrast blue for mounted-only
-state and high-contrast green while transfers run. The panel shows full mount
-and task details. The bar status is refreshed by a shared plugin service every
-two seconds. Work runs in
-transient `systemd --user` services, so closing or reloading Noctalia does not
-stop it: stop tasks and unmount explicitly.
+state and high-contrast green while transfers run. The panel shows mount, task,
+and Bisync status and recent history. The bar status is refreshed by a shared
+plugin service every two seconds. Work runs in transient `systemd --user`
+services, so closing or reloading Noctalia does not stop it: stop transfers and
+unmount explicitly.
+Schedules use the user systemd manager. With lingering disabled, a missed timer
+activation is picked up when the user session starts again.
 
 ## Mount caching
 
@@ -38,19 +45,18 @@ currently low. Full mode caches only data accessed, uses local disk rather than
 RAM, and cache files for crypt remotes contain decrypted data locally.
 
 New mounts have their own cache root under
-`$XDG_CACHE_HOME/noctalia-rclone/mounts/<mount-id>/` (or
-`~/.config/noctalia-rclone/.cache/mounts/<mount-id>/`). Existing mounts are not moved;
+`.cache/mounts/<mount-id>/` in the selected data directory. Existing mounts are not moved;
 an absent `cacheDir` keeps Rclone's original default cache root. Cache files are
 never deleted when definitions are removed. Changes to caching take effect on
 the next mount, not an active mount. Check disk space, permissions, and backups.
 
-Mounts and tasks use 8 transfers and 16 checkers. Caching does not affect tasks.
+Mounts, tasks, and Bisync runs use 8 transfers and 16 checkers. Caching does not
+affect transfers.
 
-## Diagnostics and safety
+## Logs and safety
 
-The backend provides diagnostics including the installed Rclone version,
-effective transfer and cache settings, upload status, and available
-transfer/error statistics. Opt-in logging is off by default. Logs are kept under
+The panel's **Settings** tab provides log access and a logging toggle. Opt-in
+logging is off by default. Logs are kept under
 the selected data directory's `.state/logs/` directory, with private directory and file
 permissions and bounded retention. Logs may contain filenames, paths, and
 provider errors. **Review logs before sharing**; they are not automatically safe
@@ -65,24 +71,27 @@ processes or networks.
 
 ## Data and privacy
 
-Definitions, task history, diagnostics settings, logs, and caches stay outside
-this repository under the selected data directory. Configure Rclone remotes separately; the plugin
-does not discover or store their credentials. Do not commit `rclone.conf`, saved
-definitions, logs, or task history.
+By default, definitions, task history, diagnostics settings, logs, and caches
+stay outside this repository in the selected data directory. If you choose a
+directory inside the repository, do not commit its private data. Configure
+Rclone remotes separately; the plugin does not discover or store their
+credentials. Do not commit `rclone.conf`, saved definitions, logs, or history.
 
 ## Transfer definitions between devices
 
-There is no built-in import/export button. Mount and task definitions are stored
-in the selected data directory as `mounts.json` and `tasks.json`. Stop active
-mounts and tasks, then copy those files to the same directory on the other
-device. Do not copy the `.state` directory unless task history is wanted.
+There is no built-in import/export button. Mount, task, and Bisync definitions
+are stored in the selected data directory as `mounts.json`, `tasks.json`, and
+`bisyncs.json`. Stop active mounts, tasks, and Bisync runs, then copy these files
+to the same directory on the other device. Do not copy `.state` unless run
+history and logs should be transferred too.
 
 Before using the copied definitions, update device-specific absolute local paths
-for mountpoints, task sources and destinations, and mount `cacheDir` values.
+for mountpoints, task sources and destinations, Bisync folders, and mount
+`cacheDir` values.
 Mountpoints must already exist and be empty. Configure the same Rclone remote
 names separately on the destination device; remote credentials are stored in
 Rclone's separate `rclone.conf` and must be transferred or configured securely.
-Review copied definitions before starting any mount or task.
+Review copied definitions before starting any mount, task, or Bisync pair.
 
 ## Install and develop
 

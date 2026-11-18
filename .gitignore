@@ -4,7 +4,10 @@ __pycache__/
 *.zip
 mounts.json
 tasks.json
+bisyncs.json
 runs.json
 diagnostics.json
 rclone.conf
 *.log
+.state/
+.cache/
