@@ -975,8 +975,20 @@ def stats(port):
     data = rc_call(port, "core/stats")
     if not data or not any(key in data for key in ("bytes", "speed", "errors", "transfers")):
         return None
-    return {key: data.get(key) for key in ("bytes", "totalBytes", "speed", "errors",
-                                          "transfers", "totalTransfers", "eta")}
+    result = {key: data.get(key) for key in ("bytes", "totalBytes", "speed", "errors",
+                                              "transfers", "totalTransfers", "eta")}
+    transferring = data.get("transferring")
+    if isinstance(transferring, list):
+        result["transferring"] = [
+            {key: transfer.get(key) for key in
+             ("name", "bytes", "size", "percentage", "eta", "speed", "speedAvg")}
+            for transfer in transferring[:8]
+            if isinstance(transfer, dict) and isinstance(transfer.get("name"), str)
+        ]
+    checking = data.get("checking")
+    if isinstance(checking, list):
+        result["checking"] = [name for name in checking[:8] if isinstance(name, str)]
+    return result
 
 
 def rclone_version():

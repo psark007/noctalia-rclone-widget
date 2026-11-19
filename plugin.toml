@@ -1,6 +1,6 @@
 id = "psark007/rclone-status"
 name = "Rclone Manager"
-version = "1.0.0"
+version = "1.1.0"
 plugin_api = 24
 author = "psark007"
 license = "MIT"
@@ -27,8 +27,17 @@ entry = "status.luau"
 [[panel]]
 id = "details"
 entry = "panel.luau"
-width = 640
+width = 560
 height = 640
 placement = "attached"
 position = "center"
 open_near_click = false
+
+[[panel]]
+id = "manage"
+entry = "manage.luau"
+width = 640
+height = 680
+placement = "attached"
+position = "auto"
+open_near_click = true

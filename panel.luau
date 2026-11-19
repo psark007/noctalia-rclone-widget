@@ -15,6 +15,95 @@ local loggingEnabled = false
 noctalia.setUpdateInterval(15000)
 local form = nil
 
+local function formatBytes(value)
+    local amount = tonumber(value)
+    if not amount then return "—" end
+    local units = { "B", "KiB", "MiB", "GiB", "TiB" }
+    local index = 1
+    while amount >= 1024 and index < #units do
+        amount /= 1024
+        index += 1
+    end
+    return index == 1 and string.format("%.0f %s", amount, units[index])
+        or string.format("%.1f %s", amount, units[index])
+end
+
+local function formatDuration(value)
+    local seconds = tonumber(value)
+    if not seconds or seconds < 0 then return nil end
+    seconds = math.floor(seconds)
+    if seconds >= 3600 then
+        return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
+    elseif seconds >= 60 then
+        return string.format("%dm %02ds", math.floor(seconds / 60), seconds % 60)
+    end
+    return string.format("%ds", seconds)
+end
+
+local function progressLines(stats)
+    if type(stats) ~= "table" then
+        return { "Transfer progress unavailable" }
+    end
+    local bytes = tonumber(stats.bytes) or 0
+    local total = tonumber(stats.totalBytes)
+    local speed = formatBytes(stats.speed) .. "/s"
+    local progress = "Transferred " .. formatBytes(bytes)
+    if total and total > 0 then
+        local percent = math.max(0, math.min(100, math.floor(bytes * 100 / total)))
+        local filled = math.floor(percent / 10)
+        progress = string.rep("▰", filled) .. string.rep("▱", 10 - filled)
+            .. string.format(" %d%% · %s / %s", percent, formatBytes(bytes), formatBytes(total))
+    end
+    local eta = formatDuration(stats.eta)
+    local summary = progress .. " · " .. speed
+    if eta then summary = summary .. " · ETA " .. eta end
+    summary = summary .. " · " .. tostring(stats.errors or 0) .. " errors"
+
+    local lines = { summary }
+    for index, transfer in ipairs(stats.transferring or {}) do
+        if index > 4 then break end
+        local name = tostring(transfer.name or "Transferring")
+        local size = tonumber(transfer.size)
+        local current = tonumber(transfer.bytes) or 0
+        local percent = tonumber(transfer.percentage)
+        if not percent and size and size > 0 then percent = current * 100 / size end
+        local detail = size and size > 0
+            and string.format("%s / %s", formatBytes(current), formatBytes(size))
+            or formatBytes(current)
+        if percent then detail = string.format("%s · %d%%", detail, math.max(0, math.min(100, math.floor(percent)))) end
+        local fileSpeed = tonumber(transfer.speedAvg) or tonumber(transfer.speed)
+        if fileSpeed and fileSpeed > 0 then detail = detail .. " · " .. formatBytes(fileSpeed) .. "/s" end
+        table.insert(lines, string.sub(name, 1, 84) .. " · " .. detail)
+    end
+    local checking = stats.checking or {}
+    if #checking > 0 and #lines == 1 then
+        table.insert(lines, "Checking " .. tostring(#checking) .. " files")
+    end
+    return lines
+end
+
+local function applyRuntime(targets, updates)
+    local byId = {}
+    for _, item in ipairs(updates or {}) do byId[item.id] = item end
+    for _, target in ipairs(targets or {}) do
+        local latest = byId[target.id]
+        if latest then
+            for _, key in ipairs({ "running", "status", "stats", "destination", "total", "history",
+                "startedAt", "finishedAt", "exitCode", "failure", "log", "uploads" }) do
+                target[key] = latest[key]
+            end
+        end
+    end
+end
+
+noctalia.state.watch("rclone_status", function(snapshot)
+    if type(snapshot) ~= "table" then return end
+    applyRuntime(mounts, snapshot.mounts)
+    applyRuntime(tasks, snapshot.tasks)
+    applyRuntime(bisyncs, snapshot.bisyncs)
+    render()
+end)
+
 local function decoded(result)
     local data = noctalia.json.decode(result.stdout or "")
     if result.exitCode ~= 0 or type(data) ~= "table" or data.ok == false then
@@ -81,7 +170,7 @@ local function loadSnapshot(message)
             render()
             return
         end
-        notice = message or "Status updated"
+        notice = ""
         mergeDefinitions(data)
     end)
     if not ok then
@@ -226,24 +315,21 @@ end
 function render()
     local head = {
         ui.label({ text = "Rclone", fontSize = 20, fontWeight = "bold", color = "primary", flexGrow = 1 }),
-        ui.button({ glyph = "settings", tooltip = "Rclone settings", variant = "ghost", onClick = "openSettings" }),
+        ui.button({ glyph = "settings", tooltip = "Manage Rclone entries", variant = "ghost",
+            onClick = function()
+                panel.close()
+                noctalia.togglePanel("psark007/rclone-status:manage")
+            end }),
         ui.button({ glyph = "refresh", tooltip = "Refresh status", variant = "ghost", enabled = not busy, onClick = "refresh" }),
     }
+    local runningCount = 0
+    for _, task in ipairs(tasks) do if task.running then runningCount += 1 end end
+    for _, item in ipairs(bisyncs) do if item.running then runningCount += 1 end end
     local tabs = {
         ui.button({ text = string.format("Mounts · %d/%d", (function() local n=0; for _, m in ipairs(mounts) do if m.mounted then n += 1 end end; return n end)(), #mounts), variant = activeTab == "mounts" and "secondary" or "ghost", onClick = function() activeTab="mounts"; form=nil; pending=nil; render() end, flexGrow = 1 }),
-        ui.button({ text = string.format("Tasks · %d", #tasks + #bisyncs), variant = activeTab == "tasks" and "secondary" or "ghost", onClick = function() activeTab="tasks"; form=nil; pending=nil; render() end, flexGrow = 1 }),
-        ui.button({ text = "Settings", variant = activeTab == "settings" and "secondary" or "ghost", onClick = function() activeTab="settings"; form=nil; pending=nil; render() end, flexGrow = 1 }),
+        ui.button({ text = string.format("Transfers · %d/%d", runningCount, #tasks + #bisyncs), variant = activeTab == "tasks" and "secondary" or "ghost", onClick = function() activeTab="tasks"; form=nil; pending=nil; render() end, flexGrow = 1 }),
     }
     local addActions = {}
-    if activeTab == "mounts" then
-        table.insert(addActions, ui.button({ text = "Add mount", glyph = "plus", variant = "primary", enabled = not busy,
-            onClick = function() beginForm("mount") end }))
-    elseif activeTab == "tasks" then
-        table.insert(addActions, ui.button({ text = "Add task", glyph = "plus", variant = "primary", enabled = not busy,
-            onClick = function() beginForm("task") end }))
-        table.insert(addActions, ui.button({ text = "Add Bisync", variant = "outline", enabled = not busy,
-            onClick = function() beginForm("bisync") end }))
-    end
     local list = {}
     if notice ~= "" then table.insert(list, ui.label({ text = notice, color = "on_surface_variant", maxLines = 2 })) end
 
@@ -351,6 +437,66 @@ function render()
             ui.button({ text = "Cancel", variant = "ghost", enabled = not busy, onClick = "cancelForm" }),
         }))
     elseif activeTab == "settings" then
+        table.insert(list, ui.label({ text = "Manage entries", fontWeight = "bold" }))
+        table.insert(list, ui.label({ text = "Create, edit, reorder, or remove saved definitions here. Running entries must be stopped before editing or removal.", color = "on_surface_variant", maxLines = 2 }))
+        for index, mount in ipairs(mounts) do
+            local controls = {
+                ui.button({ text = "Edit", variant = "ghost", enabled = not busy and not mount.mounted,
+                    tooltip = mount.mounted and "Unmount before editing" or "Edit mount",
+                    onClick = function() beginForm("mount", mount) end }),
+                ui.button({ text = "Remove", variant = "ghost", enabled = not busy and not mount.mounted,
+                    tooltip = mount.mounted and "Unmount before removing" or "Remove mount",
+                    onClick = function() askPending("remove-mount", mount) end }),
+            }
+            addReorderControls(controls, "mounts", mounts, index)
+            table.insert(list, ui.row({ gap = 8, align = "center" }, {
+                ui.column({ gap = 2, flexGrow = 1 }, {
+                    ui.label({ text = mount.label, fontWeight = "bold", maxLines = 1 }),
+                    ui.label({ text = (mount.remote or "") .. " → " .. (mount.path or ""), color = "on_surface_variant", maxLines = 1 }),
+                }),
+                table.unpack(controls),
+            }))
+        end
+        for index, task in ipairs(tasks) do
+            local controls = {
+                ui.button({ text = "Edit", variant = "ghost", enabled = not busy and not task.running,
+                    tooltip = task.running and "Stop before editing" or "Edit task",
+                    onClick = function() beginForm("task", task) end }),
+                ui.button({ text = "Remove", variant = "ghost", enabled = not busy and not task.running,
+                    tooltip = task.running and "Stop before removing" or "Remove task",
+                    onClick = function() askPending("remove-task", task) end }),
+            }
+            addReorderControls(controls, "tasks", tasks, index)
+            table.insert(list, ui.row({ gap = 8, align = "center" }, {
+                ui.column({ gap = 2, flexGrow = 1 }, {
+                    ui.label({ text = task.name .. " · " .. string.upper(task.action), fontWeight = "bold", maxLines = 1 }),
+                    ui.label({ text = task.direction == "upload" and "Upload" or "Download", color = "on_surface_variant" }),
+                }),
+                table.unpack(controls),
+            }))
+        end
+        for index, item in ipairs(bisyncs) do
+            local controls = {
+                ui.button({ text = "Edit", variant = "ghost", enabled = not busy and not item.running,
+                    tooltip = item.running and "Stop before editing" or "Edit Bisync pair",
+                    onClick = function() beginForm("bisync", item) end }),
+                ui.button({ text = "Remove", variant = "ghost", enabled = not busy and not item.running,
+                    tooltip = item.running and "Stop before removing" or "Remove Bisync pair",
+                    onClick = function() askPending("remove-bisync", item) end }),
+            }
+            addReorderControls(controls, "bisyncs", bisyncs, index)
+            table.insert(list, ui.row({ gap = 8, align = "center" }, {
+                ui.column({ gap = 2, flexGrow = 1 }, {
+                    ui.label({ text = item.name .. " · BISYNC", fontWeight = "bold", maxLines = 1 }),
+                    ui.label({ text = item.path1 .. " ↔ " .. item.path2, color = "on_surface_variant", maxLines = 1 }),
+                }),
+                table.unpack(controls),
+            }))
+        end
+        if #mounts + #tasks + #bisyncs == 0 then
+            table.insert(list, ui.label({ text = "No saved entries yet. Use the buttons above to add a mount, task, or Bisync pair.", color = "on_surface_variant" }))
+        end
+        table.insert(list, ui.separator({ orientation = "horizontal" }))
         table.insert(list, ui.label({ text = "Diagnostics · logs may contain filenames, paths, and provider errors", color = "on_surface_variant", maxLines = 2 }))
         table.insert(list, ui.row({ gap = 8, align = "center" }, {
             ui.button({ text = loggingEnabled and "Disable logging" or "Enable logging",
@@ -389,39 +535,46 @@ function render()
         if #mounts == 0 and #tasks == 0 and #bisyncs == 0 then
             table.insert(list, ui.label({ text = "No saved entries or logs yet.", color = "on_surface_variant" }))
         end
-        table.insert(list, ui.button({ text = "Data directory settings", glyph = "settings", variant = "ghost",
+        table.insert(list, ui.button({ text = "Data directory setting", glyph = "settings", variant = "ghost",
             onClick = "openSettings" }))
     elseif activeTab == "mounts" then
-        table.insert(list, ui.label({ text = "Saved mounts · nothing mounts automatically", color = "on_surface_variant" }))
-        if #mounts == 0 then table.insert(list, ui.label({ text = "No mounts yet. Use Add mount to create one." })) end
+        table.insert(list, ui.label({ text = "Mount status and live VFS transfer activity", color = "on_surface_variant" }))
+        if #mounts == 0 then table.insert(list, ui.label({ text = "No mounts configured. Add one from Settings." })) end
         for index, mount in ipairs(mounts) do
             local uploadState = mount.uploads and mount.uploads.state or "unknown"
             local subtitle = (mount.remote or "") .. " → " .. (mount.path or "") .. "\n" .. mount.status
             if mount.mounted then subtitle = subtitle .. " · uploads " .. uploadState end
+            local runtimeLines = {}
+            if mount.mounted and mount.stats then
+                runtimeLines = progressLines(mount.stats)
+            end
             local controls = {}
             if mount.mounted then
                 table.insert(controls, ui.button({ text = "Open", glyph = "folder-open", variant = "ghost", enabled = not busy, onClick = function() runBackend("open", mount.id) end }))
                 table.insert(controls, ui.button({ text = "Unmount", glyph = "player-stop", variant = "outline", enabled = not busy and uploadState == "clear", tooltip = uploadState == "clear" and "Unmount after two clear upload checks" or "Pending or unknown uploads block unmount", onClick = function() runBackend("unmount", mount.id) end }))
             else
                 table.insert(controls, ui.button({ text = "Mount", glyph = "player-play", variant = "secondary", enabled = not busy and mount.status == "Off", onClick = function() runBackend("mount", mount.id) end }))
-                table.insert(controls, ui.button({ text = "Edit", variant = "ghost", enabled = not busy, onClick = function() beginForm("mount", mount) end }))
-                table.insert(controls, ui.button({ text = "Remove", variant = "ghost", enabled = not busy and mount.status == "Off", onClick = function() askPending("remove-mount", mount) end }))
             end
-            addReorderControls(controls, "mounts", mounts, index)
-            table.insert(list, ui.column({ key = "mount-" .. mount.id, gap = 8, padding = 10, fill = "surface_variant/0.35", radius = 8 }, {
+            table.insert(list, ui.column({ key = "mount-" .. mount.id, gap = 8, padding = 8 }, {
                 ui.label({ text = mount.label, fontWeight = "bold", maxLines = 1 }),
                 ui.label({ text = subtitle, color = "on_surface_variant", maxLines = 2 }),
+                ui.label({ text = table.concat(runtimeLines, "\n"), color = mount.mounted and "primary" or "on_surface_variant", maxLines = 5 }),
                 ui.row({ gap = 6, align = "center" }, controls),
             }))
+            table.insert(list, ui.separator({ orientation = "horizontal" }))
         end
     else
-        table.insert(list, ui.label({ text = "Saved tasks · review paths before running", color = "on_surface_variant" }))
-        if #tasks == 0 and #bisyncs == 0 then table.insert(list, ui.label({ text = "No tasks yet. Use Add task or Add Bisync to create one." })) end
+        table.insert(list, ui.label({ text = "Transfer progress, speeds, and recent run status", color = "on_surface_variant" }))
+        if #tasks == 0 and #bisyncs == 0 then table.insert(list, ui.label({ text = "No transfers configured. Add a task or Bisync pair from Settings." })) end
         for index, task in ipairs(tasks) do
             local state = task.running and "Running" or task.status
             local direction = task.direction == "upload" and "Upload" or "Download"
             local subtitle = string.format("%s · %s · %s", string.upper(task.action), direction, state)
             if task.running then subtitle = subtitle .. string.format(" · destination %d/%d", task.destination or 0, task.total or 0) end
+            if task.running then
+                local lines = progressLines(task.stats)
+                if #lines > 0 then subtitle = subtitle .. "\n" .. table.concat(lines, "\n") end
+            end
             if task.source then subtitle = subtitle .. "\n" .. task.source .. " → " .. table.concat(task.destinationsList or {}, "; ") end
             if task.schedule then
                 local when = task.schedule.frequency == "daily" and "Daily" or "Weekly " .. (task.schedule.weekday or "monday")
@@ -441,15 +594,13 @@ function render()
                 if task.destinations == 1 then
                     table.insert(controls, ui.button({ text = "Reverse", glyph = "arrows-exchange", variant = "ghost", enabled = not busy, onClick = function() askPending("reverse", task) end }))
                 end
-                table.insert(controls, ui.button({ text = "Edit", variant = "ghost", enabled = not busy, onClick = function() beginForm("task", task) end }))
-                table.insert(controls, ui.button({ text = "Remove", variant = "ghost", enabled = not busy, onClick = function() askPending("remove-task", task) end }))
             end
-            addReorderControls(controls, "tasks", tasks, index)
-            table.insert(list, ui.column({ key = "task-" .. task.id, gap = 8, padding = 10, fill = "surface_variant/0.35", radius = 8 }, {
+            table.insert(list, ui.column({ key = "task-" .. task.id, gap = 8, padding = 8 }, {
                 ui.label({ text = task.name, fontWeight = "bold", maxLines = 1 }),
-                ui.label({ text = subtitle, color = task.running and "primary" or "on_surface_variant", maxLines = 3 }),
+                ui.label({ text = subtitle, color = task.running and "primary" or "on_surface_variant", maxLines = 9 }),
                 ui.row({ gap = 6, align = "center" }, controls),
             }))
+            table.insert(list, ui.separator({ orientation = "horizontal" }))
         end
         if #bisyncs > 0 then
             table.insert(list, ui.label({ text = "Bisync pairs", fontWeight = "bold", color = "on_surface_variant" }))
@@ -461,8 +612,8 @@ function render()
                 local when = item.schedule.frequency == "daily" and "Daily" or "Weekly " .. (item.schedule.weekday or "monday")
                 subtitle = subtitle .. "\nScheduled · " .. when .. " at " .. item.schedule.time .. " local time"
             end
-            if item.running and item.stats then
-                subtitle = subtitle .. string.format("\nRunning · %s/s · %s errors", tostring(item.stats.speed or "?"), tostring(item.stats.errors or "?"))
+            if item.running then
+                subtitle = subtitle .. "\n" .. table.concat(progressLines(item.stats), "\n")
             end
             local history = item.history or {}
             if #history > 0 then
@@ -481,18 +632,13 @@ function render()
                     onClick = function() askPending("run-bisync", item) end }))
                 table.insert(controls, ui.button({ text = "Resync", variant = "outline", enabled = not busy,
                     onClick = function() askPending("resync-bisync", item) end }))
-                table.insert(controls, ui.button({ text = "Edit", variant = "ghost", enabled = not busy,
-                    onClick = function() beginForm("bisync", item) end }))
-                table.insert(controls, ui.button({ text = "Remove", variant = "ghost", enabled = not busy,
-                    onClick = function() askPending("remove-bisync", item) end }))
             end
-            addReorderControls(controls, "bisyncs", bisyncs, index)
-            table.insert(list, ui.column({ key = "bisync-" .. item.id, gap = 8, padding = 10,
-                fill = item.running and "primary/0.12" or "surface_variant/0.35", radius = 8 }, {
+            table.insert(list, ui.column({ key = "bisync-" .. item.id, gap = 8, padding = 8 }, {
                 ui.label({ text = item.name .. " · BISYNC · " .. state, fontWeight = "bold", maxLines = 1 }),
-                ui.label({ text = subtitle, color = item.running and "primary" or "on_surface_variant", maxLines = 6 }),
+                ui.label({ text = subtitle, color = item.running and "primary" or "on_surface_variant", maxLines = 9 }),
                 ui.row({ gap = 6, align = "center" }, controls),
             }))
+            table.insert(list, ui.separator({ orientation = "horizontal" }))
         end
     end
 
@@ -508,7 +654,7 @@ function render()
 end
 
 function openSettings()
-    noctalia.runAsync("noctalia msg settings-open-plugin psark007/rclone-status")
+    noctalia.openSettings()
 end
 
 function onOpen()

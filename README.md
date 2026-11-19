@@ -27,12 +27,15 @@ definitions with another frontend.
   downloading or reversing an upload. Check paths before confirming.
 
 The bar shows counts such as `2M 1T` for two mounts and one active job;
-zero values are omitted. The cloud uses high-contrast blue for mounted-only
-state and high-contrast green while transfers run. The panel shows mount, task,
-and Bisync status and recent history. The bar status is refreshed by a shared
-plugin service every two seconds. Work runs in transient `systemd --user`
-services, so closing or reloading Noctalia does not stop it: stop transfers and
-unmount explicitly.
+zero values are omitted. Hover the cloud for transfer totals, speed, ETA, and
+up to three active filenames per transfer. The status popup separates mount
+status from transfer progress; running jobs show aggregate and per-file progress
+and speed. The settings button opens a separate management popup, with distinct
+Mounts, Tasks, and Bisync sections for adding, editing, reordering, and removing
+definitions. Routine mount and transfer actions remain in the status popup.
+Status refreshes every two seconds. Work runs
+in transient `systemd --user` services, so closing or reloading Noctalia does
+not stop it: stop transfers and unmount explicitly.
 Schedules use the user systemd manager. With lingering disabled, a missed timer
 activation is picked up when the user session starts again.
 
